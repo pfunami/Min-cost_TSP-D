@@ -4,22 +4,58 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 
-biasForDist = 1.2
-dSpeed = 70 / 60  # 時速70→分速km
-tSpeed = 45 / 60  # 時速45→分速km
+_biasForDist = 1.2
+_dSpeed = 70 / 60  # 時速70→分速km
+_tSpeed = 45 / 60  # 時速45→分速km
+
+
+class Node:
+    def __init__(self, num):
+        self.num = num
+        self.pos = (0, 0)
+        self.prev = None
+        self.next = None
+
+    def pos(self):  # sequence
+        return self.pos
+
+    def next(self):
+        return self.next
+
+    def prev(self):
+        return self.prev
+
+
+class Sequence:
+    def __init__(self, size, first, last):
+        self.size = size
+        self.first = first
+        self.last = last
+        self.nodes = []
+
+    def pos(self, i):
+        return self.nodes[i]
 
 
 def make_data(n):
     """make_data: compute matrix distance based on euclidean distance"""
-    V = range(1, n + 1)
-    xy = dict([(i, (10 * random.random(), 10 * random.random())) for i in V])
-    dd = {}  # トラックでのdist
-    dt = {}  # ドローンでのdist
+    V = [n]
+    for i in range(1, n + 1):
+        V[i] = Node(i)
+        V[i].pos = (10 * random.random(), 10 * random.random())
+        V[i].prev = i - 1
+        V[i].next = i + 1
+        if i == 1:
+            V[i].prev = n
+        elif i == n:
+            V[i].next = 1
+    dd = {}
+    dt = {}
     for i in V:
         for j in V:
             if j > i:
                 dd[i, j] = distance(xy[i][0], xy[i][1], xy[j][0], xy[j][1])
-                dt[i, j] = biasForDist * dd[i, j]
+                dt[i, j] = _biasForDist * dd[i, j]
     return V, dd, dt, xy
 
 
