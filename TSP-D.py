@@ -11,13 +11,10 @@ _tSpeed = 45 / 60  # 時速45→分速km
 
 class Node:
     def __init__(self, num):
-        self.num = num
-        self.pos = (0, 0)
+        self.pos = num
+        self.coordinate = (0, 0)
         self.prev = None
         self.next = None
-
-    def pos(self):  # sequence
-        return self.pos
 
     def next(self):
         return self.next
@@ -31,10 +28,27 @@ class Sequence:
         self.size = size
         self.first = first
         self.last = last
-        self.nodes = []
+        self.nodes = [size + 1]
 
     def pos(self, i):
+        return self.nodes[i].pos
+
+    def node(self, i):
         return self.nodes[i]
+
+    def subSequence(self, i, j):
+        sub = Sequence(j - i + 1, i, j)
+        for k in range(i, j + 1):
+            sub.nodes[k - i + 1] = self.nodes[k]
+        return sub
+
+    def edge(self):
+        edges = set()
+        i = 1
+        while i != self.size + 1:
+            edges.add((self.nodes[i].pos, self.nodes[i].next.pos))
+            i += 1
+        return edges
 
 
 def make_data(n):
