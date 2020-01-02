@@ -19,12 +19,14 @@ tT = {}  # time by truck
 _alpha = 10
 _beta = 10
 random.seed(1)
+model = Model("tsp-d")
+M = 1  # ドローンの数？
+model.setParam("epsilon", 10)
 
 
 def solve_tsp_d(S, V, N, n):
     Vl = copy.deepcopy(V[:n])
     Vr = copy.deepcopy(V[1:])
-    model = Model("tsp-d")
     x = {}
     y = {}
     p = {}
@@ -117,53 +119,101 @@ def solve_tsp_d(S, V, N, n):
             , name="11"
         )
     for i, j in N, Vr:
-        if i != j:
+        if i != j.num:
             model.addConstr(
-
+                u[i] - u[j.num] >= 1 - (n + 2) * p[i, j.num] -
+                M * (2 - quicksum(x[h.num, i] for h in Vl if h.num != i) - quicksum(
+                    x[k, j.num] for k in N if k != j.num))
+                , name="12"
+            )
+    for i, j in N, Vr:
+        if i != j.num:
+            model.addConstr(
+                u[i] - u[j.num] <=
+                -1 + (n + 2) * (1 - p[i, j.num]) +
+                M * (2 - quicksum(x[h.num, i] for h in Vl if h.num != i) - quicksum(
+                    x[k, j.num] for k in N if k != j.num))
+                , name="13"
+            )
+    for j in Vr:
+        model.addConstr(
+            u[0] - u[j.num] >= 1 - (n + 2) * p[0, j.num] - M *
+            (1 - quicksum(x[k.num, j.num] for k in Vl if k.num != j.num))
+            , name="14"
+        )
+        model.addConstr(
+            u[0] - u[j.num] <= -1 + (n + 2) * (1 - p[0, j.num]) +
+            M * (1 - quicksum(x[k.num, j.num] for k in Vl if k.num != j.num))
+            , name="15"
+        )
+    for i, k, l in Vl, Vr, N:
+        if k.num != i.num & l != i.num & l != k.num:
+            model.addConstr(
+                u[l] >= u[k.num] - M *
+                (3 - quicksum(y[i.num, j, k.num] for j in N if j != i.num) -
+                 quicksum(y[l, m, nn.num] - p[i.num, l] for m in N for nn in Vr if
+                          m != i.num & m != k.num & m != l & nn.num != i.num & nn.num != k.num))
+                , name="16"
+            )
+    for i, k in Vl, Vr:
+        if i.num != k.num:
+            model.addConstr(
+                t[k.num] >= r[i.num] + tT[i.num, k.num] - M * (1 - x[i.num, k.num])
+                , name="17"
+            )
+            model.addConstr(
+                t[k.num] <= r[i.num] + tT[i.num, k.num] + M * (1 - x[i.num, k.num])
+                , name="18"
+            )
+    for j, i in V, Vl:
+        if j.num != i.num:
+            model.addConstr(
+                td[j.num] >= r[i.num] + tD[i.num, j.num] - M * (1 - quicksum(y[i.num, j.num, k.num] for k in Vr))
+                , name="19"
+            )
+            model.addConstr(
+                td[j.num] <= r[i.num] + tD[i.num, j.num] + M * (1 - quicksum(y[i.num, j.num, k.num] for k in Vr))
+                , name="20"
             )
 
+    def make_data(n):
+        """make_data: compute matrix distance based on euclidean distance"""
+        S = Class.Sequence(n, None, None)
+        V = [n + 2]
+        for i in range(0, n + 2):  # インスタンス化
+            V[i] = Class.Node(i)
+            V[i].coordinate = (10 * random.random(), 10 * random.random())
+        for i in range(0, n + 1):  # 0~n n+1はデポ(0)
+            if i == 0:
+                V[i].next = V[i + 1]
+            else:
+                V[i].prev = V[i - 1]
+                V[i].next = V[i + 1]
+            S.nodes[i] = V[i]
+        V[n + 1].coordinate = V[0]
+        V[n + 1].prev = V[n]
+        S.first = V[0]
+        S.last = V[n + 1]
+        global dD, dT, tD, tT
+        for i in V:
+            for j in V:
+                dD[i.num, j.num] = distance(i.coordinate, j.coordinate)
+                dT[i.num, j.num] = dD[i.num, j.num] * _biasForDist
+                tD[i.num, j.num] = dD[i.num, j.num] / _dSpeed
+                tT[i.num, j.num] = dT[i.num, j.num] / _tSpeed
+        return S, V
 
-def make_data(n):
-    """make_data: compute matrix distance based on euclidean distance"""
-    S = Class.Sequence(n, None, None)
-    V = [n + 2]
-    for i in range(0, n + 2):  # インスタンス化
-        V[i] = Class.Node(i)
-        V[i].coordinate = (10 * random.random(), 10 * random.random())
-    for i in range(0, n + 1):  # 0~n n+1はデポ(0)
-        if i == 0:
-            V[i].next = V[i + 1]
-        else:
-            V[i].prev = V[i - 1]
-            V[i].next = V[i + 1]
-        S.nodes[i] = V[i]
-    V[n + 1].coordinate = V[0]
-    V[n + 1].prev = V[n]
-    S.first = V[0]
-    S.last = V[n + 1]
-    global dD, dT, tD, tT
-    for i in V:
-        for j in V:
-            dD[i.num, j.num] = distance(i.coordinate, j.coordinate)
-            dT[i.num, j.num] = dD[i.num, j.num] * _biasForDist
-            tD[i.num, j.num] = dD[i.num, j.num] / _dSpeed
-            tT[i.num, j.num] = dT[i.num, j.num] / _tSpeed
-    return S, V
+    def distance(xy1, xy2):
+        """distance: euclidean distance between (x1,y1) and (x2,y2)"""
+        return math.sqrt((xy1[0] - xy2[0]) ** 2 + (xy1[1] - xy2[2]) ** 2)
 
+    def main():
+        n = 10  # 客の総数
+        N = set(range(1, n + 1))
+        seed = 1
+        random.seed(seed)
+        S, V = make_data(n)
+        solve_tsp_d(S, V, N, n)
 
-def distance(xy1, xy2):
-    """distance: euclidean distance between (x1,y1) and (x2,y2)"""
-    return math.sqrt((xy1[0] - xy2[0]) ** 2 + (xy1[1] - xy2[2]) ** 2)
-
-
-def main():
-    n = 10  # 客の総数
-    N = set(range(1, n + 1))
-    seed = 1
-    random.seed(seed)
-    S, V = make_data(n)
-    solve_tsp_d(S, V, N, n)
-
-
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()
