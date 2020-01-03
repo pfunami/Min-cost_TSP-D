@@ -1,7 +1,7 @@
 class Node:
     def __init__(self, num):
         self.num = num
-        self.coordinate = (0, 0)
+        self.coordinate = [0, 0]
         self.prev = None
         self.next = None
         self.provider = ''
