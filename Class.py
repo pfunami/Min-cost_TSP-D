@@ -18,7 +18,7 @@ class Sequence:
         self.size = size
         self.first = first
         self.last = last
-        self.nodes = [size + 1]
+        self.nodes = []
 
     def pos(self, i):
         return self.nodes[i].pos
