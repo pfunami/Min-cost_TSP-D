@@ -7,6 +7,7 @@ import Class
 import CostFunc as f
 import copy
 
+EPS = 1.e-6
 _biasForDist = 1.2
 _dSpeed = 40 / 60  # 時速70→分速km
 _tSpeed = 40 / 60  # 時速45→分速km
@@ -21,11 +22,22 @@ tT = {}  # time by truck
 _alpha = 10
 _beta = 10
 model = Model("tsp-d")
-M = 1  # ドローンの数？
-ep = 20
+M = GRB.INFINITY  # ドローンの数？
+ep = 20.0
 
 
-def solve_tsp_d(S, V, N, n):
+def solve_tsp_d(V, N, n):
+    def P(i, j, k):
+        print(i == j | j == k | i == k)
+        if i == j | j == k | i == k:
+            return False
+        S = set(range(0, n + 2))
+        Sd = set(range(1, n + 1))
+        if (i in S) & (k in S) & (j in Sd) & (i != j) & (i != k) & (j != k):
+            if tD[i, j] + tD[j, k] <= ep:
+                return True
+        return False
+
     Vl = copy.deepcopy(V[:n + 1])
     Vr = copy.deepcopy(V[1:])
     x = {}
@@ -39,11 +51,16 @@ def solve_tsp_d(S, V, N, n):
     wd = {}
     u = {}
 
+    for i in V:
+        for j in V:
+            for k in V:
+                if i.num != j.num & i.num != k.num & j.num != k.num:
+                    y[i.num, j.num, k.num] = model.addVar(vtype="B")
     for i in Vl:
         for j in Vr:
-            x[i.num, j.num] = model.addVar(vtype="B")
-            for k in V:
-                y[i.num, j.num, k.num] = model.addVar(vtype="B")
+            if i.num != j.num:
+                x[i.num, j.num] = model.addVar(vtype="B")
+
     for i in Vr:
         t[i.num] = model.addVar(vtype="C")
         td[i.num] = model.addVar(vtype="C")
@@ -60,14 +77,15 @@ def solve_tsp_d(S, V, N, n):
     for i in V:
         u[i.num] = model.addVar(vtype="I", ub=n + 1)
     for i in N:
-        for j in N:
-            p[i, j] = model.addVar(vtype="B")
+        for j in Vr:
+            p[i, j.num] = model.addVar(vtype="B")  # Pのi,jの範囲、怪しい..
+            p[0, j.num] = 1
     model.update()
 
     for j in N:
         model.addConstr(
-            quicksum(x[i.num, j] for i in Vl) +
-            quicksum(y[i.num, j, k.num] for i in Vl for k in Vr) == 1
+            quicksum(x[i.num, j] for i in Vl if i.num != j) +
+            quicksum(y[i.num, j, k.num] for i in Vl for k in Vr if P(i.num, j, k.num)) == 1
             , name="2"
         )
     model.addConstr(
@@ -94,7 +112,7 @@ def solve_tsp_d(S, V, N, n):
     for i in N:
         for j in N:
             for k in Vr:
-                if i != j:
+                if P(i, j, k.num):
                     model.addConstr(
                         2 * y[i, j, k.num] <=
                         quicksum(x[h.num, i] for h in Vl if h.num != i) +
@@ -103,25 +121,27 @@ def solve_tsp_d(S, V, N, n):
                     )
     for j in N:
         for k in Vr:
-            model.addConstr(
-                y[0, j, k.num] <= quicksum(x[h.num, k.num] for h in Vl if h.num != k.num & h.num != j)
-                , name="8"
-            )
+            if P(0, j, k.num):
+                model.addConstr(
+                    y[0, j, k.num] <= quicksum(x[h.num, k.num] for h in Vl if h.num != k.num & h.num != j)
+                    , name="8"
+                )
     for i in Vl:
         for k in Vr:
             if i.num != k.num:
                 model.addConstr(
-                    u[k.num] - u[i.num] >= 1 - (n + 2) * (1 - quicksum(y[i.num, j, k.num] for j in N))
+                    u[k.num] - u[i.num] >= 1 - (n + 2) * (
+                            1 - quicksum(y[i.num, j, k.num] for j in N if P(i.num, j, k.num)))
                     , name="9"
                 )
     for i in Vl:
         model.addConstr(
-            quicksum(y[i.num, j, k.num] for j in N for k in Vr if j != i.num) <= 1
+            quicksum(y[i.num, j, k.num] for j in N for k in Vr if P(i.num, j, k.num)) <= 1
             , name="10"
         )
     for k in Vr:
         model.addConstr(
-            quicksum(y[i.num, j, k.num] for i in Vl for j in N if k.num != i.num) <= 1
+            quicksum(y[i.num, j, k.num] for i in Vl for j in N if P(i.num, j, k.num)) <= 1
             , name="11"
         )
     for i in N:
@@ -160,9 +180,10 @@ def solve_tsp_d(S, V, N, n):
                 if k.num != i.num & l != i.num & l != k.num:
                     model.addConstr(
                         u[l] >= u[k.num] - M *
-                        (3 - quicksum(y[i.num, j, k.num] for j in N if j != i.num) -
+                        (3 - quicksum(y[i.num, j, k.num] for j in N if j != i.num & P(i.num, j, k.num)) -
                          quicksum(y[l, m, nn.num] - p[i.num, l] for m in N for nn in Vr if
-                                  m != i.num & m != k.num & m != l & nn.num != i.num & nn.num != k.num))
+                                  m != i.num & m != k.num & m != l & nn.num != i.num & nn.num != k.num & P(l, m,
+                                                                                                           nn.num)))
                         , name="16"
                     )
     for i in Vl:
@@ -180,60 +201,71 @@ def solve_tsp_d(S, V, N, n):
         for i in Vl:
             if j.num != i.num:
                 model.addConstr(
-                    td[j.num] >= r[i.num] + tD[i.num, j.num] - M * (1 - quicksum(y[i.num, j.num, k.num] for k in Vr))
+                    td[j.num] >= r[i.num] + tD[i.num, j.num] - M * (
+                            1 - quicksum(y[i.num, j.num, k.num] for k in Vr if P(i.num, j.num, k.num)))
                     , name="19"
                 )
                 model.addConstr(
-                    td[j.num] <= r[i.num] + tD[i.num, j.num] + M * (1 - quicksum(y[i.num, j.num, k.num] for k in Vr))
+                    td[j.num] <= r[i.num] + tD[i.num, j.num] + M * (
+                            1 - quicksum(y[i.num, j.num, k.num] for k in Vr if P(i.num, j.num, k.num)))
                     , name="20"
                 )
     for j in V:
         for k in Vr:
             if j.num != k.num:
                 model.addConstr(
-                    td[k.num] >= rd[j.num] + tD[j.num, k.num] - M * (1 - quicksum(y[i.num, j.num, k.num] for i in Vl))
+                    td[k.num] >= rd[j.num] + tD[j.num, k.num] - M * (
+                            1 - quicksum(y[i.num, j.num, k.num] for i in Vl if P(i.num, j.num, k.num)))
                     , name="21"
                 )
                 model.addConstr(
-                    td[k.num] <= rd[j.num] + tD[j.num, k.num] + M * (1 - quicksum(y[i.num, j.num, k.num] for i in Vl))
+                    td[k.num] <= rd[j.num] + tD[j.num, k.num] + M * (
+                            1 - quicksum(y[i.num, j.num, k.num] for i in Vl if P(i.num, j.num, k.num)))
                     , name="22"
                 )
     for j in N:
         model.addConstr(
-            td[j] >= rd[j] - M * (1 - quicksum(y[i.num, j, k.num] for i in Vl for k in Vr if i.num != k.num))
+            td[j] >= rd[j] - M * (
+                    1 - quicksum(y[i.num, j, k.num] for i in Vl for k in Vr if P(i.num, j, k.num)))
             , name="23"
         )
         model.addConstr(
-            td[j] <= rd[j] + M * (1 - quicksum(y[i.num, j, k.num] for i in Vl for k in Vr if i.num != k.num))
+            td[j] <= rd[j] + M * (
+                    1 - quicksum(y[i.num, j, k.num] for i in Vl for k in Vr if P(i.num, j, k.num)))
             , name="24"
         )
     for k in Vr:
         model.addConstr(
-            r[k.num] >= t[k.num] +
-            Sl * quicksum(y[k.num, l, m.num] for l in N for m in Vr if l != k.num & m.num != l & m.num != k.num) +
-            Sr * quicksum(y[i.num, j, k.num] for i in Vl for j in N if i.num != k.num) -
-            M * (1 - quicksum(y[i.num, j, k.num] for i in Vl for j in N if i.num != k.num))
+            r[k.num] >= t[k.num] + Sl * quicksum(y[k.num, l, m.num] for l in N for m in Vr
+                                                 if P(k.num, l, m.num)) +
+            Sr * quicksum(y[i.num, j, k.num] for i in Vl for j in N if P(i.num, j, k.num)) -
+            M * (1 - quicksum(y[i.num, j, k.num] for i in Vl for j in N if P(i.num, j, k.num)))
             , name="25"
+
         )
+
         model.addConstr(
-            rd[k.num] >= td[k.num] +
-            Sl * quicksum(y[k.num, l, m.num] for l in N for m in Vr if l != k.num & m.num != l & m.num != k.num) +
-            Sr * quicksum(y[i.num, j, k.num] for i in Vl for j in N if i.num != k.num) -
-            M * (1 - quicksum(y[i.num, j, k.num] for i in Vl for j in N if i.num != k.num))
+            rd[k.num] >= td[k.num] + Sl * 1
+            * quicksum(y[k.num, l, m.num] for l in N for m in Vr
+                       if  P(k.num, l, m.num)) +
+            Sr * quicksum(y[i.num, j, k.num] for i in Vl for j in N if P(i.num, j, k.num)) -
+            M * (1 - quicksum(y[i.num, j, k.num] for i in Vl for j in N if P(i.num, j, k.num)))
             , name="26"
         )
     for k in Vr:
         for j in N:
             if j != k.num:
                 for i in Vr:
-                    model.addConstr(
-                        rd[k.num] - (rd[j] - tD[i.num, j]) - Sl *
-                        quicksum(
-                            y[k.num, l, m.num] for l in N for m in Vr if
-                            l != i.num & l != j & l != k.num & m.num != k.num & m.num != i.num & m.num != l
-                        ) <= ep + M * (1 - y[i.num, j, k.num])
-                        , name="27"
-                    )
+                    if P(i.num, j, k.num):
+                        model.addConstr(
+                            rd[k.num] - (rd[j] - tD[i.num, j]) - Sl *
+                            quicksum(
+                                y[k.num, l, m.num] for l in N for m in Vr if
+                                l != i.num & l != j & l != k.num & m.num != k.num & m.num != i.num & m.num != l
+                                & P(k.num, l, m.num)
+                            ) <= ep + M * (1 - y[i.num, j, k.num])
+                            , name="27"
+                        )
     for k in Vr:
         model.addConstr(
             w[k.num] >= 0, name="28"
@@ -292,27 +324,39 @@ def solve_tsp_d(S, V, N, n):
         model.addConstr(
             rd[i.num] >= 0, name="46"
         )
+
     model.setObjective(
         C1 * quicksum(dT[i.num, j.num] * x[i.num, j.num] for i in Vl for j in Vr if i.num != j.num) +
-        C2 * quicksum((dD[i.num, j] + dD[j.num, k.num]) * y[i.num, j, k.num] for i in Vl for j in N for k in Vr) +
+        C2 * quicksum((dD[i.num, j] + dD[j, k.num]) * y[i.num, j, k.num] for i in Vl for j in N for k in Vr if
+                      (i.num != j) & P(i.num, j, k.num)) +
         _alpha * quicksum(w[i.num] for i in V) + _beta * quicksum(wd[i.num] for i in V)
         , GRB.MINIMIZE
     )
 
-    model.optimize()
-
-    print("opt val : ", model.ObjVal)
-    print("Optimal cost:", model.getVars())
-
-
-def P(i, j, k, n):
-    V = set(range(0, n + 2))
-    Vd = set(range(1, n + 1))
-    if (i in V & k in V) & (j in Vd) & (i != j) & (i != k) & (j != k) & (tD[i, j] + tD[j, k] <= ep):
-        return True
-    else:
-        return False
-
+    # model.write("test2.lp")
+    # model.optimize()
+    # model.computeIIS()
+    # model.write("forum2.sol")
+    while True:
+        model.optimize()
+        edgesT = []
+        edgesD = []
+        for (i, j) in x:
+            if x[i, j].X == 1:
+                edgesT.append((i, j))
+        for (i, j, k) in y:
+            if y[i, j, k].X == 1:
+                edgesD.append((i, j, k))
+        if model.IsMIP:
+            print("break")
+            break
+        for (i, j) in x:
+            x[i, j].VType = "B"
+        for (i, j, k) in y:
+            y[i, j, k].VType = "B"
+        model.update()
+    print("Optimal tour:", edgesT)
+    print("Optimal tour:", edgesD)
 
 
 def make_data(n):
@@ -349,12 +393,14 @@ def distance(xy1, xy2):
 
 
 def main():
-    n = 10  # 客の総数
+    n = 7  # 客の総数
     N = set(range(1, n + 1))
     seed = 1
     random.seed(seed)
     S, V = make_data(n)
-    solve_tsp_d(S, V, N, n)
+    # for i in V:
+    #     print(i.coordinate)
+    solve_tsp_d(V, N, n)
 
 
 if __name__ == "__main__":
